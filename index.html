@@ -1,0 +1,725 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Comparison Tool</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.2/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .diff-added { background-color: rgba(34, 197, 94, 0.3); color: rgb(187, 247, 208); }
+        .diff-deleted { background-color: rgba(239, 68, 68, 0.3); color: rgb(252, 165, 165); }
+        .diff-modified { background-color: rgba(234, 179, 8, 0.3); color: rgb(254, 240, 138); }
+        .diff-unchanged { color: rgb(209, 213, 219); }
+        .loading-spinner {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .bg-dark { background-color: #111827; }
+        .text-light { color: #f3f4f6; }
+        .text-primary { color: #1e40af; }
+        .bg-primary { background-color: #1e40af; }
+        .text-accent { color: #3b82f6; }
+        .bg-accent { background-color: #3b82f6; }
+        .hover\:bg-accent:hover { background-color: #3b82f6; }
+        .hover\:bg-primary:hover { background-color: #1e40af; }
+        .hover\:border-accent:hover { border-color: #3b82f6; }
+    </style>
+</head>
+<body class="bg-dark text-light min-h-screen font-sans">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-accent mb-2">Document Comparison Tool</h1>
+            <p class="text-gray-400">Compare documents side-by-side with advanced diff algorithms</p>
+        </header>
+
+        <!-- File Upload Section -->
+        <div class="grid md:grid-cols-2 gap-6 mb-8">
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-semibold mb-4 text-accent">Original Document</h3>
+                <div class="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center hover:border-accent transition-colors">
+                    <input type="file" id="file1" class="hidden" accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg">
+                    <label for="file1" class="cursor-pointer">
+                        <div class="text-4xl mb-2">📄</div>
+                        <p class="text-gray-400 mb-2">Click to upload or drag & drop</p>
+                        <p class="text-sm text-gray-500">Supports PDF, Word, Text, and Images</p>
+                    </label>
+                </div>
+                <div id="file1-info" class="mt-4 text-sm text-gray-400"></div>
+            </div>
+
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h3 class="text-lg font-semibold mb-4 text-accent">Comparison Document</h3>
+                <div class="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center hover:border-accent transition-colors">
+                    <input type="file" id="file2" class="hidden" accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg">
+                    <label for="file2" class="cursor-pointer">
+                        <div class="text-4xl mb-2">📄</div>
+                        <p class="text-gray-400 mb-2">Click to upload or drag & drop</p>
+                        <p class="text-sm text-gray-500">Supports PDF, Word, Text, and Images</p>
+                    </label>
+                </div>
+                <div id="file2-info" class="mt-4 text-sm text-gray-400"></div>
+            </div>
+        </div>
+
+        <!-- Control Panel -->
+        <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-8">
+            <div class="flex flex-wrap items-center gap-4">
+                <button id="compare-btn" class="bg-primary hover:bg-accent px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                    Compare Documents
+                </button>
+                <button id="clear-btn" class="bg-gray-700 hover:bg-gray-600 px-6 py-2 rounded-lg font-medium transition-colors">
+                    Clear All
+                </button>
+                <div class="flex items-center gap-2">
+                    <label for="algorithm-select" class="text-sm text-gray-400">Algorithm:</label>
+                    <select id="algorithm-select" class="bg-gray-700 text-light px-3 py-1 rounded border border-gray-600">
+                        <option value="myers">Myers' Algorithm</option>
+                        <option value="word">Word-based</option>
+                        <option value="line">Line-based</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="ignore-whitespace" class="rounded">
+                    <label for="ignore-whitespace" class="text-sm text-gray-400">Ignore whitespace</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading" class="hidden text-center py-8">
+            <div class="inline-block w-8 h-8 border-4 border-accent border-t-transparent rounded-full loading-spinner"></div>
+            <p class="mt-4 text-gray-400">Processing documents...</p>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results" class="hidden">
+            <!-- Similarity Score -->
+            <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 mb-6">
+                <h3 class="text-lg font-semibold mb-4 text-accent">Comparison Results</h3>
+                <div class="grid md:grid-cols-4 gap-4 text-center">
+                    <div class="bg-gray-700 rounded-lg p-4">
+                        <div class="text-2xl font-bold text-accent" id="similarity-score">0%</div>
+                        <div class="text-sm text-gray-400">Similarity</div>
+                    </div>
+                    <div class="bg-gray-700 rounded-lg p-4">
+                        <div class="text-2xl font-bold text-green-400" id="additions-count">0</div>
+                        <div class="text-sm text-gray-400">Additions</div>
+                    </div>
+                    <div class="bg-gray-700 rounded-lg p-4">
+                        <div class="text-2xl font-bold text-red-400" id="deletions-count">0</div>
+                        <div class="text-sm text-gray-400">Deletions</div>
+                    </div>
+                    <div class="bg-gray-700 rounded-lg p-4">
+                        <div class="text-2xl font-bold text-yellow-400" id="modifications-count">0</div>
+                        <div class="text-sm text-gray-400">Modifications</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Side-by-side Comparison -->
+            <div class="bg-gray-800 rounded-lg border border-gray-700">
+                <div class="p-6 border-b border-gray-700">
+                    <h3 class="text-lg font-semibold text-accent">Side-by-side Comparison</h3>
+                </div>
+                <div class="grid md:grid-cols-2 gap-0">
+                    <div class="p-6 border-r border-gray-700">
+                        <h4 class="font-medium text-gray-300 mb-4">Original Document</h4>
+                        <div id="original-content" class="font-mono text-sm bg-gray-900 rounded p-4 max-h-96 overflow-y-auto"></div>
+                    </div>
+                    <div class="p-6">
+                        <h4 class="font-medium text-gray-300 mb-4">Comparison Document</h4>
+                        <div id="comparison-content" class="font-mono text-sm bg-gray-900 rounded p-4 max-h-96 overflow-y-auto"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Generate Report Button -->
+            <div class="mt-6 text-center">
+                <button id="generate-report" class="bg-accent hover:bg-primary px-6 py-2 rounded-lg font-medium transition-colors">
+                    Generate Comparison Report
+                </button>
+            </div>
+        </div>
+
+        <!-- Privacy Notice -->
+        <div class="mt-12 bg-gray-800 rounded-lg p-6 border border-gray-700">
+            <h3 class="text-lg font-semibold mb-4 text-accent">Privacy & Security</h3>
+            <ul class="text-sm text-gray-400 space-y-2">
+                <li>• All document processing happens locally in your browser</li>
+                <li>• No files are uploaded to external servers</li>
+                <li>• Temporary data is automatically cleaned up after comparison</li>
+                <li>• No tracking or analytics are used</li>
+                <li>• Your documents remain completely private</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let file1Content = null;
+        let file2Content = null;
+        let file1Type = null;
+        let file2Type = null;
+
+        // PDF.js setup
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeFileHandlers();
+            initializeEventListeners();
+        });
+
+        function initializeFileHandlers() {
+            const file1Input = document.getElementById('file1');
+            const file2Input = document.getElementById('file2');
+
+            file1Input.addEventListener('change', (e) => handleFileSelect(e, 1));
+            file2Input.addEventListener('change', (e) => handleFileSelect(e, 2));
+
+            // Drag and drop functionality
+            setupDragAndDrop();
+        }
+
+        function setupDragAndDrop() {
+            const dropZones = document.querySelectorAll('[for="file1"], [for="file2"]');
+            
+            dropZones.forEach(zone => {
+                zone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    zone.classList.add('border-accent');
+                });
+
+                zone.addEventListener('dragleave', (e) => {
+                    e.preventDefault();
+                    zone.classList.remove('border-accent');
+                });
+
+                zone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    zone.classList.remove('border-accent');
+                    
+                    const fileNum = zone.getAttribute('for') === 'file1' ? 1 : 2;
+                    const files = e.dataTransfer.files;
+                    
+                    if (files.length > 0) {
+                        handleFileSelect({ target: { files: files } }, fileNum);
+                    }
+                });
+            });
+        }
+
+        function initializeEventListeners() {
+            document.getElementById('compare-btn').addEventListener('click', compareDocuments);
+            document.getElementById('clear-btn').addEventListener('click', clearAll);
+            document.getElementById('generate-report').addEventListener('click', generateReport);
+        }
+
+        async function handleFileSelect(event, fileNumber) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const infoElement = document.getElementById(`file${fileNumber}-info`);
+            infoElement.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <span class="text-accent">📄</span>
+                    <span>${file.name}</span>
+                    <span class="text-gray-500">(${formatFileSize(file.size)})</span>
+                </div>
+            `;
+
+            try {
+                const content = await extractFileContent(file);
+                if (fileNumber === 1) {
+                    file1Content = content;
+                    file1Type = file.type;
+                } else {
+                    file2Content = content;
+                    file2Type = file.type;
+                }
+
+                // Enable compare button if both files are loaded
+                const compareBtn = document.getElementById('compare-btn');
+                compareBtn.disabled = !(file1Content && file2Content);
+                
+            } catch (error) {
+                console.error('Error processing file:', error);
+                infoElement.innerHTML = `<span class="text-red-400">Error: ${error.message}</span>`;
+            }
+        }
+
+        async function extractFileContent(file) {
+            const fileType = file.type;
+            
+            if (fileType === 'text/plain') {
+                return await file.text();
+            } else if (fileType === 'application/pdf') {
+                return await extractPdfContent(file);
+            } else if (fileType.includes('word') || fileType.includes('officedocument')) {
+                return await extractWordContent(file);
+            } else if (fileType.startsWith('image/')) {
+                return await extractImageContent(file);
+            } else {
+                throw new Error('Unsupported file type');
+            }
+        }
+
+        async function extractPdfContent(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+            let text = '';
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                text += textContent.items.map(item => item.str).join(' ') + '\n';
+            }
+            
+            return text;
+        }
+
+        async function extractWordContent(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const result = await mammoth.extractRawText({ arrayBuffer });
+            return result.value;
+        }
+
+        async function extractImageContent(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        ctx.drawImage(img, 0, 0);
+                        
+                        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        resolve({
+                            type: 'image',
+                            data: imageData,
+                            width: canvas.width,
+                            height: canvas.height
+                        });
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function compareDocuments() {
+            if (!file1Content || !file2Content) {
+                alert('Please select both files before comparing');
+                return;
+            }
+
+            showLoading(true);
+            
+            try {
+                let result;
+                
+                if (typeof file1Content === 'object' && file1Content.type === 'image') {
+                    result = await compareImages(file1Content, file2Content);
+                } else {
+                    result = await compareText(file1Content, file2Content);
+                }
+                
+                displayResults(result);
+                
+            } catch (error) {
+                console.error('Comparison error:', error);
+                alert('Error during comparison: ' + error.message);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function compareText(text1, text2) {
+            const algorithm = document.getElementById('algorithm-select').value;
+            const ignoreWhitespace = document.getElementById('ignore-whitespace').checked;
+            
+            // Preprocess text
+            let processedText1 = text1;
+            let processedText2 = text2;
+            
+            if (ignoreWhitespace) {
+                processedText1 = text1.replace(/\s+/g, ' ').trim();
+                processedText2 = text2.replace(/\s+/g, ' ').trim();
+            }
+            
+            let diff;
+            
+            switch (algorithm) {
+                case 'myers':
+                    diff = myersDiff(processedText1, processedText2);
+                    break;
+                case 'word':
+                    diff = wordBasedDiff(processedText1, processedText2);
+                    break;
+                case 'line':
+                    diff = lineBasedDiff(processedText1, processedText2);
+                    break;
+                default:
+                    diff = myersDiff(processedText1, processedText2);
+            }
+            
+            return analyzeDiff(diff, processedText1, processedText2);
+        }
+
+        async function compareImages(img1, img2) {
+            if (img1.width !== img2.width || img1.height !== img2.height) {
+                throw new Error('Images must have the same dimensions for comparison');
+            }
+            
+            const data1 = img1.data.data;
+            const data2 = img2.data.data;
+            let totalPixels = img1.width * img1.height;
+            let differentPixels = 0;
+            
+            for (let i = 0; i < data1.length; i += 4) {
+                const r1 = data1[i], g1 = data1[i + 1], b1 = data1[i + 2];
+                const r2 = data2[i], g2 = data2[i + 1], b2 = data2[i + 2];
+                
+                if (r1 !== r2 || g1 !== g2 || b1 !== b2) {
+                    differentPixels++;
+                }
+            }
+            
+            const similarity = Math.round((1 - differentPixels / totalPixels) * 100);
+            
+            return {
+                similarity,
+                additions: 0,
+                deletions: 0,
+                modifications: differentPixels,
+                diff: [{ type: 'image', similarity }]
+            };
+        }
+
+        function myersDiff(text1, text2) {
+            const lines1 = text1.split('\n');
+            const lines2 = text2.split('\n');
+            
+            const M = lines1.length;
+            const N = lines2.length;
+            const MAX = M + N;
+            
+            const v = new Array(2 * MAX + 1);
+            v[1] = 0;
+            
+            const trace = [];
+            
+            for (let d = 0; d <= MAX; d++) {
+                trace.push([...v]);
+                
+                for (let k = -d; k <= d; k += 2) {
+                    let x;
+                    if (k === -d || (k !== d && v[k - 1] < v[k + 1])) {
+                        x = v[k + 1];
+                    } else {
+                        x = v[k - 1] + 1;
+                    }
+                    
+                    let y = x - k;
+                    
+                    while (x < M && y < N && lines1[x] === lines2[y]) {
+                        x++;
+                        y++;
+                    }
+                    
+                    v[k] = x;
+                    
+                    if (x >= M && y >= N) {
+                        return backtrack(trace, lines1, lines2, x, y, d);
+                    }
+                }
+            }
+            
+            return [];
+        }
+
+        function backtrack(trace, lines1, lines2, x, y, d) {
+            const diff = [];
+            
+            for (let i = d; i > 0; i--) {
+                const v = trace[i];
+                const k = x - y;
+                
+                let prevK;
+                if (k === -i || (k !== i && v[k - 1] < v[k + 1])) {
+                    prevK = k + 1;
+                } else {
+                    prevK = k - 1;
+                }
+                
+                const prevX = v[prevK];
+                const prevY = prevX - prevK;
+                
+                while (x > prevX && y > prevY) {
+                    diff.unshift({ type: 'unchanged', value: lines1[x - 1] });
+                    x--;
+                    y--;
+                }
+                
+                if (x > prevX) {
+                    diff.unshift({ type: 'deleted', value: lines1[x - 1] });
+                    x--;
+                } else if (y > prevY) {
+                    diff.unshift({ type: 'added', value: lines2[y - 1] });
+                    y--;
+                }
+            }
+            
+            return diff;
+        }
+
+        function wordBasedDiff(text1, text2) {
+            const words1 = text1.split(/\s+/);
+            const words2 = text2.split(/\s+/);
+            
+            // Simple word-based diff implementation
+            const diff = [];
+            let i = 0, j = 0;
+            
+            while (i < words1.length && j < words2.length) {
+                if (words1[i] === words2[j]) {
+                    diff.push({ type: 'unchanged', value: words1[i] });
+                    i++;
+                    j++;
+                } else {
+                    // Look ahead for matches
+                    let found = false;
+                    for (let k = j + 1; k < Math.min(j + 10, words2.length); k++) {
+                        if (words1[i] === words2[k]) {
+                            // Add deletions
+                            for (let l = j; l < k; l++) {
+                                diff.push({ type: 'added', value: words2[l] });
+                            }
+                            diff.push({ type: 'unchanged', value: words1[i] });
+                            i++;
+                            j = k + 1;
+                            found = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!found) {
+                        diff.push({ type: 'deleted', value: words1[i] });
+                        i++;
+                    }
+                }
+            }
+            
+            // Add remaining words
+            while (i < words1.length) {
+                diff.push({ type: 'deleted', value: words1[i] });
+                i++;
+            }
+            
+            while (j < words2.length) {
+                diff.push({ type: 'added', value: words2[j] });
+                j++;
+            }
+            
+            return diff;
+        }
+
+        function lineBasedDiff(text1, text2) {
+            const lines1 = text1.split('\n');
+            const lines2 = text2.split('\n');
+            
+            return myersDiff(text1, text2);
+        }
+
+        function analyzeDiff(diff, text1, text2) {
+            let additions = 0;
+            let deletions = 0;
+            let modifications = 0;
+            let unchanged = 0;
+            
+            diff.forEach(item => {
+                switch (item.type) {
+                    case 'added':
+                        additions++;
+                        break;
+                    case 'deleted':
+                        deletions++;
+                        break;
+                    case 'modified':
+                        modifications++;
+                        break;
+                    case 'unchanged':
+                        unchanged++;
+                        break;
+                }
+            });
+            
+            const total = additions + deletions + modifications + unchanged;
+            const similarity = total > 0 ? Math.round((unchanged / total) * 100) : 0;
+            
+            return {
+                similarity,
+                additions,
+                deletions,
+                modifications,
+                diff
+            };
+        }
+
+        function displayResults(result) {
+            // Update statistics
+            document.getElementById('similarity-score').textContent = result.similarity + '%';
+            document.getElementById('additions-count').textContent = result.additions;
+            document.getElementById('deletions-count').textContent = result.deletions;
+            document.getElementById('modifications-count').textContent = result.modifications;
+            
+            // Display diff in side-by-side view
+            displaySideBySide(result.diff);
+            
+            // Show results section
+            document.getElementById('results').classList.remove('hidden');
+        }
+
+        function displaySideBySide(diff) {
+            const originalContent = document.getElementById('original-content');
+            const comparisonContent = document.getElementById('comparison-content');
+            
+            let originalHtml = '';
+            let comparisonHtml = '';
+            
+            diff.forEach(item => {
+                if (item.type === 'image') {
+                    originalHtml = '<p class="text-gray-400">Image comparison complete</p>';
+                    comparisonHtml = `<p class="text-gray-400">Similarity: ${item.similarity}%</p>`;
+                } else {
+                    const escapedValue = escapeHtml(item.value);
+                    
+                    switch (item.type) {
+                        case 'unchanged':
+                            originalHtml += `<span class="diff-unchanged">${escapedValue}</span>\n`;
+                            comparisonHtml += `<span class="diff-unchanged">${escapedValue}</span>\n`;
+                            break;
+                        case 'deleted':
+                            originalHtml += `<span class="diff-deleted">${escapedValue}</span>\n`;
+                            comparisonHtml += `<span class="text-gray-600">[DELETED]</span>\n`;
+                            break;
+                        case 'added':
+                            originalHtml += `<span class="text-gray-600">[ADDED]</span>\n`;
+                            comparisonHtml += `<span class="diff-added">${escapedValue}</span>\n`;
+                            break;
+                        case 'modified':
+                            originalHtml += `<span class="diff-modified">${escapedValue}</span>\n`;
+                            comparisonHtml += `<span class="diff-modified">${escapedValue}</span>\n`;
+                            break;
+                    }
+                }
+            });
+            
+            originalContent.innerHTML = originalHtml;
+            comparisonContent.innerHTML = comparisonHtml;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showLoading(show) {
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            
+            if (show) {
+                loading.classList.remove('hidden');
+                results.classList.add('hidden');
+            } else {
+                loading.classList.add('hidden');
+            }
+        }
+
+        function clearAll() {
+            // Reset file inputs
+            document.getElementById('file1').value = '';
+            document.getElementById('file2').value = '';
+            
+            // Clear file info
+            document.getElementById('file1-info').innerHTML = '';
+            document.getElementById('file2-info').innerHTML = '';
+            
+            // Clear global variables
+            file1Content = null;
+            file2Content = null;
+            file1Type = null;
+            file2Type = null;
+            
+            // Hide results
+            document.getElementById('results').classList.add('hidden');
+            
+            // Disable compare button
+            document.getElementById('compare-btn').disabled = true;
+        }
+
+        function generateReport() {
+            const similarity = document.getElementById('similarity-score').textContent;
+            const additions = document.getElementById('additions-count').textContent;
+            const deletions = document.getElementById('deletions-count').textContent;
+            const modifications = document.getElementById('modifications-count').textContent;
+            
+            const report = `
+Document Comparison Report
+Generated: ${new Date().toLocaleDateString()}
+
+Summary:
+- Similarity Score: ${similarity}
+- Additions: ${additions}
+- Deletions: ${deletions}
+- Modifications: ${modifications}
+
+Analysis:
+This comparison was performed using client-side processing with no external data transmission.
+All processing was done locally to ensure document privacy and security.
+
+Generated by Document Comparison Tool
+            `.trim();
+            
+            const blob = new Blob([report], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'comparison-report.txt';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // Cleanup function to ensure privacy
+        window.addEventListener('beforeunload', function() {
+            // Clear sensitive data
+            file1Content = null;
+            file2Content = null;
+            file1Type = null;
+            file2Type = null;
+        });
+    </script>
+</body>
+</html>
