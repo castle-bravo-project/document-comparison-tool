@@ -1,4 +1,4 @@
-# Document Comparison Tool
+# Document Comparison Tool [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](link) ![Static Badge](https://img.shields.io/badge/Validation-Pending-red) [![License](https://img.shields.io/badge/license-GPLv3.0-blue)](LICENSE)
 
 A powerful, privacy-focused web application for comparing documents and images with advanced diff algorithms.
 
